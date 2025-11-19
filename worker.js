@@ -70,8 +70,14 @@ class MailboxManager {
   }
 
   async connect() {
-    if (this.isConnecting) return;
-    if (this.client && !this.client.closed) return;
+    if (this.isConnecting) {
+      log('WARN', 'Conexao ja em andamento, aguardando...', this.logDetails);
+      return;
+    }
+    if (this.client !== null) {
+      log('WARN', 'Cliente ja existe, bloqueando nova conexao.', this.logDetails);
+      return;
+    }
 
     this.isConnecting = true;
     log('INFO', 'Conectando via ImapFlow...', this.logDetails);
@@ -130,15 +136,16 @@ class MailboxManager {
   }
 
   async disconnect() {
-    if (this.client && !this.client.closed) {
+    if (this.client) {
       log('INFO', 'Desconectando...', this.logDetails);
       await this.client.logout().catch(() => {});
+      this.client = null;
     }
   }
 
   async pollForNewEmails() {
     if (this.isPolling) return;
-    if (!this.client || this.client.closed) {
+    if (this.client === null) {
       return this.connect();
     }
 
@@ -184,6 +191,7 @@ class MailboxManager {
       log('ERROR', 'Erro ao buscar e-mails.', { ...this.logDetails, error: err.message });
 
       await this.disconnect();
+      log('INFO', `Reconexao agendada em ${RECONNECT_DELAY_MS}ms.`, this.logDetails);
       setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
 
     } finally {
