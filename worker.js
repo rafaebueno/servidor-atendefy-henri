@@ -32,6 +32,8 @@ class MailboxManager {
     this.lastChecked = 0;
     this.pollingInterval = POLLING_INTERVAL_BASE_MS + Math.floor(Math.random() * 5000);
     this.logDetails = { mailboxId: this.credentials.id, email: this.credentials.email };
+    this.connectionStartTime = null;
+    this.lastImapActivity = null;
   }
 
   async initialize() {
@@ -80,36 +82,73 @@ class MailboxManager {
     }
 
     this.isConnecting = true;
-    log('INFO', 'Conectando via ImapFlow...', this.logDetails);
+
+    const imapConfig = {
+      host: this.credentials.imap_host,
+      port: this.credentials.imap_port || 993,
+      secure: this.credentials.imap_secure,
+      idling: true,
+      keepalive: {
+        idleInterval: 15000,
+        interval: 10000,
+        maxCount: 3
+      }
+    };
+
+    log('INFO', 'Conectando via ImapFlow...', {
+      ...this.logDetails,
+      provider: this.credentials.imap_host,
+      config: imapConfig
+    });
 
     try {
       this.client = new ImapFlow({
-        host: this.credentials.imap_host,
-        port: this.credentials.imap_port || 993,
-        secure: this.credentials.imap_secure,
+        ...imapConfig,
         auth: {
           user: this.credentials.email,
           pass: this.credentials.password
         },
-        logger: false,
-        idling: true,
-        keepalive: {
-          idleInterval: 15000,
-          interval: 10000,
-          maxCount: 3
-        }
+        logger: false
+      });
+
+      this.client.on('error', (err) => {
+        log('ERROR', 'Erro IMAP capturado antes do close.', {
+          ...this.logDetails,
+          error: err.message,
+          stack: err.stack,
+          code: err.code,
+          provider: this.credentials.imap_host,
+          uptime: this.connectionStartTime ? Math.floor((Date.now() - this.connectionStartTime) / 1000) + 's' : null,
+          lastActivity: this.lastImapActivity
+        });
       });
 
       this.client.on('close', () => {
-        log('WARN', 'Conexão IMAP fechada inesperadamente.', this.logDetails);
+        const uptime = this.connectionStartTime ? Math.floor((Date.now() - this.connectionStartTime) / 1000) : 0;
+        log('WARN', 'Conexão IMAP fechada inesperadamente.', {
+          ...this.logDetails,
+          provider: this.credentials.imap_host,
+          uptimeSeconds: uptime,
+          uptimeFormatted: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m ${uptime % 60}s`,
+          lastActivity: this.lastImapActivity,
+          wasPolling: this.isPolling
+        });
         this.client = null;
+        this.connectionStartTime = null;
       });
 
       await this.client.connect();
       await this.client.mailboxOpen('INBOX');
 
+      this.connectionStartTime = Date.now();
+      this.lastImapActivity = new Date().toISOString();
       this.isConnecting = false;
-      log('INFO', 'Conexão IMAP estabelecida.', this.logDetails);
+
+      log('INFO', 'Conexão IMAP estabelecida.', {
+        ...this.logDetails,
+        provider: this.credentials.imap_host,
+        connectedAt: this.lastImapActivity
+      });
 
       if (!this.syncStatus.initial_sync_completed_at) {
         const firstSyncTime = new Date().toISOString();
@@ -154,6 +193,7 @@ class MailboxManager {
 
     this.isPolling = true;
     this.lastChecked = Date.now();
+    this.lastImapActivity = new Date().toISOString();
     await this.updateSyncStatus({ last_synced_at: new Date().toISOString() });
 
     const lastUID = this.syncStatus.last_processed_uid;
@@ -163,6 +203,7 @@ class MailboxManager {
 
     try {
       const lock = await this.client.getMailboxLock('INBOX');
+      this.lastImapActivity = new Date().toISOString();
       let processedCount = 0;
 
       try {
