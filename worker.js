@@ -9,6 +9,7 @@ const INSTANCE_ID = process.env.INSTANCE_ID || 1;
 const RECONCILE_INTERVAL_MS = 60000;
 const POLLING_INTERVAL_BASE_MS = 20000;
 const RECONNECT_DELAY_MS = 30000;
+const LOCK_TIMEOUT_MS = 30000;
 
 const managedMailboxes = new Map();
 
@@ -89,9 +90,9 @@ class MailboxManager {
       secure: this.credentials.imap_secure,
       idling: true,
       keepalive: {
-        idleInterval: 15000,
-        interval: 10000,
-        maxCount: 3
+        idleInterval: 90000,
+        interval: 30000,
+        maxCount: 5
       }
     };
 
@@ -121,17 +122,41 @@ class MailboxManager {
           uptime: this.connectionStartTime ? Math.floor((Date.now() - this.connectionStartTime) / 1000) + 's' : null,
           lastActivity: this.lastImapActivity
         });
+
+        // Limpa client em caso de erro para evitar estado inconsistente
+        if (this.client) {
+          this.client.logout().catch(() => {});
+          this.client = null;
+          this.connectionStartTime = null;
+        }
       });
 
       this.client.on('close', () => {
         const uptime = this.connectionStartTime ? Math.floor((Date.now() - this.connectionStartTime) / 1000) : 0;
+        const timeSinceLastActivity = this.lastImapActivity
+          ? Math.floor((Date.now() - new Date(this.lastImapActivity).getTime()) / 1000)
+          : null;
+
         log('WARN', 'Conexão IMAP fechada inesperadamente.', {
           ...this.logDetails,
           provider: this.credentials.imap_host,
+          port: this.credentials.imap_port || 993,
           uptimeSeconds: uptime,
           uptimeFormatted: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m ${uptime % 60}s`,
           lastActivity: this.lastImapActivity,
-          wasPolling: this.isPolling
+          timeSinceLastActivitySeconds: timeSinceLastActivity,
+          timeSinceLastActivityFormatted: timeSinceLastActivity
+            ? `${Math.floor(timeSinceLastActivity / 60)}m ${timeSinceLastActivity % 60}s`
+            : null,
+          wasPolling: this.isPolling,
+          wasConnecting: this.isConnecting,
+          keepaliveConfig: {
+            idleInterval: 90000,
+            interval: 30000,
+            maxCount: 5
+          },
+          lastProcessedUid: this.syncStatus?.last_processed_uid || 0,
+          initialSyncCompleted: !!this.syncStatus?.initial_sync_completed_at
         });
         this.client = null;
         this.connectionStartTime = null;
@@ -202,7 +227,12 @@ class MailboxManager {
     log('INFO', `Verificando novos e-mails desde UID ${nextUID}.`, this.logDetails);
 
     try {
-      const lock = await this.client.getMailboxLock('INBOX');
+      const lockPromise = this.client.getMailboxLock('INBOX');
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Lock timeout')), LOCK_TIMEOUT_MS)
+      );
+
+      const lock = await Promise.race([lockPromise, timeoutPromise]);
       this.lastImapActivity = new Date().toISOString();
       let processedCount = 0;
 
