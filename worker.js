@@ -102,7 +102,7 @@ class MailboxManager {
 
       this.client.on('close', () => {
         log('WARN', 'Conexão IMAP fechada inesperadamente.', this.logDetails);
-        setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
+        this.client = null;
       });
 
       await this.client.connect();
@@ -146,6 +146,7 @@ class MailboxManager {
   async pollForNewEmails() {
     if (this.isPolling) return;
     if (this.client === null) {
+      log('INFO', 'Cliente desconectado, reconectando...', this.logDetails);
       return this.connect();
     }
 
@@ -189,10 +190,7 @@ class MailboxManager {
       }
     } catch (err) {
       log('ERROR', 'Erro ao buscar e-mails.', { ...this.logDetails, error: err.message });
-
       await this.disconnect();
-      log('INFO', `Reconexao agendada em ${RECONNECT_DELAY_MS}ms.`, this.logDetails);
-      setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
 
     } finally {
       this.isPolling = false;
