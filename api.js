@@ -3,6 +3,7 @@ const express = require('express');
 const nodemailer = require('nodemailer');
 const supabase = require('./supabase.js');
 const Imap = require('node-imap');
+const { managedMailboxes } = require('./worker.js');
 
 const app = express();
 app.use(express.json());
@@ -241,6 +242,78 @@ app.post('/api/send', async (req, res) => {
   } catch (error) {
     console.error('Erro ao enviar e-mail:', error);
     res.status(500).json({ success: false, error: 'Falha ao enviar o e-mail.', details: error.message });
+  }
+});
+
+app.get('/test/list-mailboxes', (req, res) => {
+  try {
+    const mailboxes = Array.from(managedMailboxes.entries()).map(([id, manager]) => ({
+      id,
+      email: manager.credentials.email,
+      connected: manager.client && !manager.client.closed,
+      isPolling: manager.isPolling,
+      lastChecked: new Date(manager.lastChecked).toISOString()
+    }));
+
+    res.status(200).json({ mailboxes });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao listar mailboxes', details: error.message });
+  }
+});
+
+app.post('/test/force-disconnect/:mailboxId', (req, res) => {
+  try {
+    const mailboxId = parseInt(req.params.mailboxId, 10);
+    const emailFilter = req.query.email;
+
+    const manager = managedMailboxes.get(mailboxId);
+
+    if (!manager) {
+      return res.status(404).json({
+        success: false,
+        error: `Mailbox ${mailboxId} nao encontrada em managedMailboxes`,
+        available_mailboxes: Array.from(managedMailboxes.keys())
+      });
+    }
+
+    if (emailFilter && manager.credentials.email !== emailFilter) {
+      return res.status(400).json({
+        success: false,
+        error: `Email nao corresponde. Esperado: ${manager.credentials.email}, Recebido: ${emailFilter}`
+      });
+    }
+
+    if (!manager.client || manager.client.closed) {
+      return res.status(400).json({
+        success: false,
+        mailboxId,
+        email: manager.credentials.email,
+        error: 'Cliente ja esta desconectado ou nulo'
+      });
+    }
+
+    manager.client.close();
+    console.log(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: 'TEST',
+      mailboxId: manager.credentials.id,
+      email: manager.credentials.email,
+      message: 'Cliente IMAP fechado forcadamente via endpoint de teste.'
+    }));
+
+    res.status(200).json({
+      success: true,
+      mailboxId,
+      email: manager.credentials.email,
+      action: 'connection_forced_closed',
+      message: 'Cliente IMAP desconectado forcadamente. Aguarde polling detectar erro (~5-20s).'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao forcar desconexao',
+      details: error.message
+    });
   }
 });
 

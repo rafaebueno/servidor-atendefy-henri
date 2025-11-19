@@ -334,89 +334,6 @@ function pollManagedMailboxes() {
   });
 }
 
-const http = require('http');
-
-http.createServer((req, res) => {
-  const urlParts = req.url.split('?');
-  const path = urlParts[0];
-  const query = new URLSearchParams(urlParts[1] || '');
-
-  const match = path.match(/^\/test\/force-disconnect\/(\d+)$/);
-
-  if (match) {
-      const mailboxId = parseInt(match[1], 10);
-      const emailFilter = query.get('email');
-
-      const manager = managedMailboxes.get(mailboxId);
-
-      if (!manager) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          success: false,
-          error: `Mailbox ${mailboxId} nao encontrada em managedMailboxes`,
-          available_mailboxes: Array.from(managedMailboxes.keys())
-        }));
-        return;
-      }
-
-      if (emailFilter && manager.credentials.email !== emailFilter) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          success: false,
-          error: `Email nao corresponde. Esperado: ${manager.credentials.email}, Recebido: ${emailFilter}`
-        }));
-        return;
-      }
-
-      if (!manager.client || manager.client.closed) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          success: false,
-          mailboxId,
-          email: manager.credentials.email,
-          error: 'Cliente ja esta desconectado ou nulo'
-        }));
-        return;
-      }
-
-      manager.client.close();
-      log('TEST', 'Cliente IMAP fechado forcadamente via endpoint de teste.', manager.logDetails);
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        success: true,
-        mailboxId,
-        email: manager.credentials.email,
-        action: 'connection_forced_closed',
-        message: 'Cliente IMAP desconectado forcadamente. Aguarde polling detectar erro (~5-20s).'
-      }));
-
-    } else if (path === '/test/list-mailboxes') {
-      const mailboxes = Array.from(managedMailboxes.entries()).map(([id, manager]) => ({
-        id,
-        email: manager.credentials.email,
-        connected: manager.client && !manager.client.closed,
-        isPolling: manager.isPolling,
-        lastChecked: new Date(manager.lastChecked).toISOString()
-      }));
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ mailboxes }));
-
-    } else {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        error: 'Endpoint nao encontrado',
-        available_endpoints: [
-          'GET /test/force-disconnect/:mailboxId[?email=...]',
-          'GET /test/list-mailboxes'
-        ]
-      }));
-    }
-}).listen(3001, () => {
-  log('INFO', 'Servidor de teste rodando na porta 3001');
-});
-
 async function main() {
   log('INFO', 'Iniciando Multi-Worker (ImapFlow)...');
 
@@ -437,3 +354,5 @@ async function main() {
 }
 
 main();
+
+module.exports = { managedMailboxes };
