@@ -334,17 +334,16 @@ function pollManagedMailboxes() {
   });
 }
 
-if (process.env.NODE_ENV === 'development') {
-  const http = require('http');
+const http = require('http');
 
-  http.createServer((req, res) => {
-    const urlParts = req.url.split('?');
-    const path = urlParts[0];
-    const query = new URLSearchParams(urlParts[1] || '');
+http.createServer((req, res) => {
+  const urlParts = req.url.split('?');
+  const path = urlParts[0];
+  const query = new URLSearchParams(urlParts[1] || '');
 
-    const match = path.match(/^\/test\/force-disconnect\/(\d+)$/);
+  const match = path.match(/^\/test\/force-disconnect\/(\d+)$/);
 
-    if (match) {
+  if (match) {
       const mailboxId = parseInt(match[1], 10);
       const emailFilter = query.get('email');
 
@@ -414,10 +413,9 @@ if (process.env.NODE_ENV === 'development') {
         ]
       }));
     }
-  }).listen(3001, () => {
-    log('INFO', 'Servidor de teste rodando na porta 3001 (NODE_ENV=development)');
-  });
-}
+}).listen(3001, () => {
+  log('INFO', 'Servidor de teste rodando na porta 3001');
+});
 
 async function main() {
   log('INFO', 'Iniciando Multi-Worker (ImapFlow)...');
