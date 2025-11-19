@@ -12,6 +12,20 @@ const PORT = process.env.PORT || 3000;
 
 const INSTANCE_ID = process.env.INSTANCE_ID || 1;
 
+function authenticate(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader?.split(' ')[1];
+
+  if (!token || token !== process.env.API_BEARER_TOKEN) {
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Token invalido ou ausente. Use: Authorization: Bearer TOKEN'
+    });
+  }
+
+  next();
+}
+
 function validateImapCredentials(config) {
   return new Promise((resolve, reject) => {
     const imap = new Imap({
@@ -64,6 +78,8 @@ function validateSmtpCredentials(config) {
 app.get('/health/live', (req, res) => {
   res.status(200).json({ status: 'alive' });
 });
+
+app.use(authenticate);
 
 app.get('/health/:email', async (req, res) => {
   const { email } = req.params;
