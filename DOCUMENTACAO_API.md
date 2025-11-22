@@ -1196,7 +1196,338 @@ WEBHOOK_URL=https://seu-servidor.com/webhook
 
 ---
 
+## Exemplos Completos com cURL
+
+Esta seção contém exemplos prontos para uso com `curl` que podem ser copiados diretamente para o terminal ou Postman.
+
+### Configuração Inicial
+
+**Defina suas variáveis:**
+```bash
+# Windows PowerShell
+$BASE_URL = "http://localhost:3000"
+$TOKEN = "seu_token_aqui"
+
+# Linux/Mac
+export BASE_URL="http://localhost:3000"
+export TOKEN="seu_token_aqui"
+```
+
+---
+
+### Health Check
+
+**1. Health Check Simples (sem autenticação):**
+```bash
+# Windows PowerShell
+curl http://localhost:3000/health/live
+
+# Linux/Mac
+curl http://localhost:3000/health/live
+```
+
+**2. Health Check de Mailbox Específica:**
+```bash
+# Windows PowerShell
+curl -H "Authorization: Bearer $TOKEN" `
+  http://localhost:3000/health/usuario@example.com
+
+# Linux/Mac
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/health/usuario@example.com
+```
+
+---
+
+### Gerenciamento de Mailboxes
+
+**3. Listar Todas as Mailboxes:**
+```bash
+# Windows PowerShell
+curl -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  http://localhost:3000/api/mailboxes
+
+# Linux/Mac
+curl -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  http://localhost:3000/api/mailboxes
+```
+
+**4. Adicionar Nova Mailbox (Gmail):**
+```bash
+# Windows PowerShell
+curl -X POST http://localhost:3000/api/mailboxes `
+  -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  -d '{
+    \"email\": \"novaconta@gmail.com\",
+    \"password\": \"senha_app_16_caracteres\",
+    \"imap_host\": \"imap.gmail.com\",
+    \"imap_port\": 993,
+    \"imap_secure\": true,
+    \"smtp_host\": \"smtp.gmail.com\",
+    \"smtp_port\": 465,
+    \"smtp_secure\": true
+  }'
+
+# Linux/Mac
+curl -X POST http://localhost:3000/api/mailboxes \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "novaconta@gmail.com",
+    "password": "senha_app_16_caracteres",
+    "imap_host": "imap.gmail.com",
+    "imap_port": 993,
+    "imap_secure": true,
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 465,
+    "smtp_secure": true
+  }'
+```
+
+**5. Adicionar Nova Mailbox (Outlook):**
+```bash
+# Windows PowerShell
+curl -X POST http://localhost:3000/api/mailboxes `
+  -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  -d '{
+    \"email\": \"usuario@outlook.com\",
+    \"password\": \"sua_senha\",
+    \"imap_host\": \"outlook.office365.com\",
+    \"imap_port\": 993,
+    \"imap_secure\": true,
+    \"smtp_host\": \"smtp.office365.com\",
+    \"smtp_port\": 587,
+    \"smtp_secure\": false
+  }'
+
+# Linux/Mac
+curl -X POST http://localhost:3000/api/mailboxes \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "usuario@outlook.com",
+    "password": "sua_senha",
+    "imap_host": "outlook.office365.com",
+    "imap_port": 993,
+    "imap_secure": true,
+    "smtp_host": "smtp.office365.com",
+    "smtp_port": 587,
+    "smtp_secure": false
+  }'
+```
+
+**6. Deletar Mailbox:**
+```bash
+# Windows PowerShell
+curl -X DELETE http://localhost:3000/api/mailboxes/usuario@example.com `
+  -H "Authorization: Bearer $TOKEN"
+
+# Linux/Mac
+curl -X DELETE http://localhost:3000/api/mailboxes/usuario@example.com \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+### Consulta de E-mails
+
+**7. Listar E-mails (primeira página, 20 itens):**
+```bash
+# Windows PowerShell
+curl -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  "http://localhost:3000/api/mailboxes/usuario@example.com/emails?page=1&limit=20"
+
+# Linux/Mac
+curl -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  "http://localhost:3000/api/mailboxes/usuario@example.com/emails?page=1&limit=20"
+```
+
+**8. Listar E-mails (página 2, 10 itens):**
+```bash
+# Windows PowerShell
+curl -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  "http://localhost:3000/api/mailboxes/usuario@example.com/emails?page=2&limit=10"
+
+# Linux/Mac
+curl -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  "http://localhost:3000/api/mailboxes/usuario@example.com/emails?page=2&limit=10"
+```
+
+---
+
+### Envio de E-mails
+
+**9. Enviar E-mail (texto simples):**
+```bash
+# Windows PowerShell
+curl -X POST http://localhost:3000/api/send `
+  -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  -d '{
+    \"from\": \"minhaconta@gmail.com\",
+    \"to\": \"destinatario@example.com\",
+    \"subject\": \"Teste de Envio\",
+    \"text\": \"Este é um e-mail de teste enviado via API.\"
+  }'
+
+# Linux/Mac
+curl -X POST http://localhost:3000/api/send \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "minhaconta@gmail.com",
+    "to": "destinatario@example.com",
+    "subject": "Teste de Envio",
+    "text": "Este é um e-mail de teste enviado via API."
+  }'
+```
+
+**10. Enviar E-mail (HTML com confirmação de leitura):**
+```bash
+# Windows PowerShell
+curl -X POST http://localhost:3000/api/send `
+  -H "Authorization: Bearer $TOKEN" `
+  -H "Content-Type: application/json" `
+  -d '{
+    \"from\": \"minhaconta@gmail.com\",
+    \"to\": \"destinatario@example.com\",
+    \"subject\": \"E-mail com HTML\",
+    \"html\": \"<h1>Olá!</h1><p>Este é um <strong>e-mail HTML</strong>.</p>\",
+    \"text\": \"Versão em texto plano\",
+    \"requestReadReceipt\": true
+  }'
+
+# Linux/Mac
+curl -X POST http://localhost:3000/api/send \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "minhaconta@gmail.com",
+    "to": "destinatario@example.com",
+    "subject": "E-mail com HTML",
+    "html": "<h1>Olá!</h1><p>Este é um <strong>e-mail HTML</strong>.</p>",
+    "text": "Versão em texto plano",
+    "requestReadReceipt": true
+  }'
+```
+
+---
+
+### Endpoints de Teste
+
+**11. Listar Mailboxes Ativas no Worker:**
+```bash
+# Windows PowerShell
+curl -H "Authorization: Bearer $TOKEN" `
+  http://localhost:3000/test/list-mailboxes
+
+# Linux/Mac
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/test/list-mailboxes
+```
+
+**12. Forçar Desconexão IMAP:**
+```bash
+# Windows PowerShell
+curl -X POST "http://localhost:3000/test/force-disconnect/1?email=usuario@gmail.com" `
+  -H "Authorization: Bearer $TOKEN"
+
+# Linux/Mac
+curl -X POST "http://localhost:3000/test/force-disconnect/1?email=usuario@gmail.com" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+### Exemplos Práticos de Uso
+
+**Fluxo Completo: Adicionar e Testar Mailbox**
+
+```bash
+# 1. Adicionar mailbox
+curl -X POST http://localhost:3000/api/mailboxes \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "teste@gmail.com",
+    "password": "senha_app",
+    "imap_host": "imap.gmail.com",
+    "imap_port": 993,
+    "imap_secure": true,
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 465,
+    "smtp_secure": true
+  }'
+
+# 2. Aguardar 60 segundos para sincronização inicial
+
+# 3. Verificar status
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/health/teste@gmail.com
+
+# 4. Listar e-mails sincronizados
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:3000/api/mailboxes/teste@gmail.com/emails?page=1&limit=5"
+
+# 5. Enviar e-mail de teste
+curl -X POST http://localhost:3000/api/send \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "teste@gmail.com",
+    "to": "destinatario@example.com",
+    "subject": "Teste",
+    "text": "Mensagem de teste"
+  }'
+```
+
+---
+
+### Dicas para Uso com cURL
+
+**1. Salvar resposta em arquivo:**
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/mailboxes \
+  -o mailboxes.json
+```
+
+**2. Ver headers da resposta:**
+```bash
+curl -i -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/health/live
+```
+
+**3. Modo verbose (debug):**
+```bash
+curl -v -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/mailboxes
+```
+
+**4. Ignorar certificado SSL (apenas desenvolvimento):**
+```bash
+curl -k -H "Authorization: Bearer $TOKEN" \
+  https://localhost:3000/api/mailboxes
+```
+
+**5. Timeout personalizado:**
+```bash
+curl --max-time 30 -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/mailboxes
+```
+
+---
+
 ## Exemplo de Collection Postman
+
 
 ### Configuração de Environment
 
@@ -1243,5 +1574,5 @@ Para problemas ou dúvidas:
 
 ---
 
-**Versão da Documentação:** 1.0
-**Última Atualização:** 20/01/2025
+**Versão da Documentação:** 1.1  
+**Última Atualização:** 22/11/2025

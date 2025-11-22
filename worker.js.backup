@@ -125,7 +125,7 @@ class MailboxManager {
 
         // Limpa client em caso de erro para evitar estado inconsistente
         if (this.client) {
-          this.client.logout().catch(() => { });
+          this.client.logout().catch(() => {});
           this.client = null;
           this.connectionStartTime = null;
         }
@@ -194,7 +194,7 @@ class MailboxManager {
       });
       this.isConnecting = false;
 
-      if (this.client) await this.client.logout().catch(() => { });
+      if (this.client) await this.client.logout().catch(() => {});
       setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
     }
   }
@@ -202,7 +202,7 @@ class MailboxManager {
   async disconnect() {
     if (this.client) {
       log('INFO', 'Desconectando...', this.logDetails);
-      await this.client.logout().catch(() => { });
+      await this.client.logout().catch(() => {});
       this.client = null;
     }
   }
@@ -244,15 +244,9 @@ class MailboxManager {
           const saved = await this.saveEmailToDb(parsed, msg.uid);
 
           if (saved) {
-            // SEMPRE atualiza UID (mesmo se email já foi processado)
-            // Isso garante que a fila avança e não fica presa
             await this.updateSyncStatus({ last_processed_uid: msg.uid });
-
-            // Só envia webhook se for email NOVO (não já processado)
-            if (!saved.alreadyProcessed) {
-              await this.sendToWebhook(parsed);
-              processedCount++;
-            }
+            await this.sendToWebhook(parsed);
+            processedCount++;
           }
         }
 
@@ -300,31 +294,17 @@ class MailboxManager {
       raw_headers: parsedEmail.headers
     };
 
-    // Usar UPSERT em vez de INSERT para tornar operação idempotente
-    const { data, error } = await supabase
-      .from('emails')
-      .upsert(emailData, {
-        onConflict: 'mailbox_id,uid',  // Usa constraint UNIQUE existente
-        ignoreDuplicates: true          // Ignora se já existe (não atualiza)
-      })
-      .select();
+    const { error } = await supabase.from('emails').insert(emailData);
 
     if (error) {
-      // Apenas erros reais (não duplicação)
+      if (error.code === '23505') {
+        log('WARN', `E-mail duplicado (id: ${parsedEmail.messageId}).`, this.logDetails);
+        return null;
+      }
       throw error;
     }
 
-    // Detectar se foi inserido (novo) ou ignorado (já existia)
-    const wasInserted = data && data.length > 0;
-
-    if (!wasInserted) {
-      // Email já foi processado anteriormente, apenas logar em DEBUG
-      log('DEBUG', `E-mail já processado (UID: ${uid}), pulando.`, this.logDetails);
-      return { alreadyProcessed: true, uid, emailData };
-    }
-
-    // Email novo, processado com sucesso
-    return { alreadyProcessed: false, uid, emailData };
+    return emailData;
   }
 
   async sendToWebhook(parsedEmail) {
