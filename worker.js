@@ -35,6 +35,8 @@ class MailboxManager {
     this.logDetails = { mailboxId: this.credentials.id, email: this.credentials.email };
     this.connectionStartTime = null;
     this.lastImapActivity = null;
+    // Cache de message_id enviados recentemente (previne duplicação de webhook)
+    this.sentWebhooks = new Set();
   }
 
   async initialize() {
@@ -208,15 +210,24 @@ class MailboxManager {
   }
 
   async pollForNewEmails() {
-    if (this.isPolling) return;
+    // CRITICAL: Seta flag IMEDIATAMENTE para prevenir race condition
+    if (this.isPolling) {
+      log('DEBUG', 'Polling já em andamento, ignorando chamada duplicada.', this.logDetails);
+      return;
+    }
+    this.isPolling = true;
+
+    // Validações após setar a flag
     if (this.client === null) {
       log('INFO', 'Cliente desconectado, reconectando...', this.logDetails);
+      this.isPolling = false;  // Reseta flag antes de retornar
       return this.connect();
     }
 
-    if (!this.syncStatus.initial_sync_completed_at) return;
-
-    this.isPolling = true;
+    if (!this.syncStatus.initial_sync_completed_at) {
+      this.isPolling = false;  // Reseta flag antes de retornar
+      return;
+    }
     this.lastChecked = Date.now();
     this.lastImapActivity = new Date().toISOString();
     await this.updateSyncStatus({ last_synced_at: new Date().toISOString() });
@@ -334,6 +345,17 @@ class MailboxManager {
       return;
     }
 
+    // DEDUPLICAÇÃO: Verifica se webhook já foi enviado para este message_id
+    const messageId = parsedEmail.messageId;
+    if (attempt === 1 && this.sentWebhooks.has(messageId)) {
+      log('WARN', 'Webhook já enviado para este message_id, ignorando duplicata.', {
+        ...this.logDetails,
+        messageId: messageId,
+        cacheSize: this.sentWebhooks.size
+      });
+      return;
+    }
+
     let originalFrom = null;
     const returnPath = parsedEmail.headers.get('return-path');
     if (returnPath?.value?.[0]?.address) {
@@ -345,7 +367,7 @@ class MailboxManager {
       from: parsedEmail.from?.value[0]?.address,
       to: parsedEmail.to?.value[0]?.address,
       subject: parsedEmail.subject,
-      message_id: parsedEmail.messageId,
+      message_id: messageId,
       date: parsedEmail.date,
       original_from: originalFrom,
       text: parsedEmail.text,
@@ -419,6 +441,15 @@ class MailboxManager {
         attempt: attempt,
         retriesUsed: attempt - 1
       });
+
+      // Adiciona ao cache de webhooks enviados (previne duplicação futura)
+      this.sentWebhooks.add(messageId);
+
+      // Limpa cache se ficar muito grande (mantém últimos 1000)
+      if (this.sentWebhooks.size > 1000) {
+        const toDelete = Array.from(this.sentWebhooks).slice(0, 500);
+        toDelete.forEach(id => this.sentWebhooks.delete(id));
+      }
 
       return true; // Sucesso
 
