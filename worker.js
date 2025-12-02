@@ -356,6 +356,12 @@ class MailboxManager {
       return;
     }
 
+    // CRÍTICO: Marca como enviado ANTES do axios.post para prevenir race condition
+    // Se falhar, será removido do cache no catch
+    if (attempt === 1) {
+      this.sentWebhooks.add(messageId);
+    }
+
     let originalFrom = null;
     const returnPath = parsedEmail.headers.get('return-path');
     if (returnPath?.value?.[0]?.address) {
@@ -442,9 +448,6 @@ class MailboxManager {
         retriesUsed: attempt - 1
       });
 
-      // Adiciona ao cache de webhooks enviados (previne duplicação futura)
-      this.sentWebhooks.add(messageId);
-
       // Limpa cache se ficar muito grande (mantém últimos 1000)
       if (this.sentWebhooks.size > 1000) {
         const toDelete = Array.from(this.sentWebhooks).slice(0, 500);
@@ -518,6 +521,16 @@ class MailboxManager {
           : 'Erro não recuperável';
 
         log('ERROR', 'FALHA DEFINITIVA ao enviar webhook!', errorDetails);
+
+        // Remove do cache em caso de falha definitiva (permite retry futuro)
+        if (attempt === 1) {
+          this.sentWebhooks.delete(messageId);
+          log('DEBUG', 'Message_id removido do cache após falha definitiva.', {
+            ...this.logDetails,
+            messageId: messageId
+          });
+        }
+
         return false; // Falha definitiva
       }
     }
