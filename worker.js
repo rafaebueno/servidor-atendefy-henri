@@ -327,9 +327,12 @@ class MailboxManager {
     return { alreadyProcessed: false, uid, emailData };
   }
 
-  async sendToWebhook(parsedEmail) {
+  async sendToWebhook(parsedEmail, attempt = 1, maxRetries = 3) {
     const webhookUrl = process.env.WEBHOOK_URL;
-    if (!webhookUrl) return;
+    if (!webhookUrl) {
+      log('WARN', 'WEBHOOK_URL não configurada, pulando envio.', this.logDetails);
+      return;
+    }
 
     let originalFrom = null;
     const returnPath = parsedEmail.headers.get('return-path');
@@ -337,23 +340,155 @@ class MailboxManager {
       originalFrom = returnPath.value[0].address;
     }
 
+    const payload = {
+      client_id: this.credentials.email,
+      from: parsedEmail.from?.value[0]?.address,
+      to: parsedEmail.to?.value[0]?.address,
+      subject: parsedEmail.subject,
+      message_id: parsedEmail.messageId,
+      date: parsedEmail.date,
+      original_from: originalFrom,
+      text: parsedEmail.text,
+      html: parsedEmail.html
+    };
+
+    // Validação de payload
+    const payloadValidation = {
+      hasClientId: !!payload.client_id,
+      hasFrom: !!payload.from,
+      hasTo: !!payload.to,
+      hasSubject: !!payload.subject,
+      hasMessageId: !!payload.message_id,
+      hasText: !!payload.text,
+      hasHtml: !!payload.html,
+      textLength: payload.text ? payload.text.length : 0,
+      htmlLength: payload.html ? payload.html.length : 0,
+      textHasNonPrintable: payload.text ? /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(payload.text) : false,
+      htmlHasNonPrintable: payload.html ? /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(payload.html) : false
+    };
+
+    const startTime = Date.now();
+    const payloadString = JSON.stringify(payload);
+    const payloadSize = payloadString.length;
+
+    log('INFO', 'Iniciando envio de webhook...', {
+      ...this.logDetails,
+      messageId: parsedEmail.messageId,
+      webhookUrl: webhookUrl,
+      payloadSize: payloadSize,
+      attempt: attempt,
+      maxRetries: maxRetries,
+      validation: payloadValidation
+    });
+
+    // Log detalhado se payload for suspeito (muito grande ou com caracteres inválidos)
+    if (payloadSize > 100000 || payloadValidation.textHasNonPrintable || payloadValidation.htmlHasNonPrintable) {
+      log('WARN', 'Payload suspeito detectado!', {
+        ...this.logDetails,
+        messageId: parsedEmail.messageId,
+        payloadSize: payloadSize,
+        textLength: payloadValidation.textLength,
+        htmlLength: payloadValidation.htmlLength,
+        hasNonPrintableChars: payloadValidation.textHasNonPrintable || payloadValidation.htmlHasNonPrintable,
+        // Mostrar primeiro trecho do payload para debug
+        payloadPreview: payloadString.substring(0, 500)
+      });
+    }
+
     try {
-      await axios.post(webhookUrl, {
-        client_id: this.credentials.email,
-        from: parsedEmail.from?.value[0]?.address,
-        to: parsedEmail.to?.value[0]?.address,
-        subject: parsedEmail.subject,
-        message_id: parsedEmail.messageId,
-        date: parsedEmail.date,
-        original_from: originalFrom,
-        text: parsedEmail.text,
-        html: parsedEmail.html
+      const response = await axios.post(webhookUrl, payload, {
+        timeout: 30000, // 30 segundos
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        validateStatus: function (status) {
+          return status >= 200 && status < 300; // Aceita apenas 2xx como sucesso
+        }
       });
 
-      log('INFO', `Webhook enviado (${parsedEmail.messageId}).`, this.logDetails);
+      const duration = Date.now() - startTime;
+
+      log('INFO', 'Webhook enviado com sucesso!', {
+        ...this.logDetails,
+        messageId: parsedEmail.messageId,
+        webhookUrl: webhookUrl,
+        statusCode: response.status,
+        statusText: response.statusText,
+        durationMs: duration,
+        responseData: response.data ? JSON.stringify(response.data).substring(0, 200) : null,
+        attempt: attempt,
+        retriesUsed: attempt - 1
+      });
+
+      return true; // Sucesso
 
     } catch (error) {
-      log('ERROR', 'Falha ao enviar webhook.', { ...this.logDetails, error: error.message });
+      const duration = Date.now() - startTime;
+
+      // Detalhamento específico do erro
+      const errorDetails = {
+        ...this.logDetails,
+        messageId: parsedEmail.messageId,
+        webhookUrl: webhookUrl,
+        durationMs: duration,
+        errorMessage: error.message,
+        errorCode: error.code,
+        payloadSize: JSON.stringify(payload).length,
+        attempt: attempt,
+        maxRetries: maxRetries
+      };
+
+      // Capturar detalhes da resposta HTTP se existir
+      if (error.response) {
+        errorDetails.httpStatus = error.response.status;
+        errorDetails.httpStatusText = error.response.statusText;
+        errorDetails.responseData = error.response.data ? JSON.stringify(error.response.data).substring(0, 200) : null;
+        errorDetails.responseHeaders = error.response.headers;
+      }
+
+      // Capturar detalhes da requisição se não houve resposta
+      if (error.request && !error.response) {
+        errorDetails.requestSent = true;
+        errorDetails.noResponse = true;
+        errorDetails.possibleCause = 'Timeout, rede offline ou servidor N8N não respondeu';
+      }
+
+      // Timeout específico
+      if (error.code === 'ECONNABORTED') {
+        errorDetails.timeoutExceeded = true;
+        errorDetails.timeoutMs = 30000;
+      }
+
+      // Decidir se deve retentar
+      const shouldRetry = attempt < maxRetries && (
+        error.code === 'ECONNABORTED' || // Timeout
+        error.code === 'ECONNREFUSED' || // Conexão recusada
+        error.code === 'ENOTFOUND' ||    // DNS não encontrado
+        error.code === 'ETIMEDOUT' ||    // Timeout de rede
+        (error.response && error.response.status >= 500) // Erro 5xx do servidor
+      );
+
+      if (shouldRetry) {
+        const backoffDelay = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // Exponential backoff (max 10s)
+        errorDetails.willRetry = true;
+        errorDetails.retryAfterMs = backoffDelay;
+
+        log('WARN', 'Falha ao enviar webhook, tentando novamente...', errorDetails);
+
+        // Aguardar antes de retentar
+        await new Promise(resolve => setTimeout(resolve, backoffDelay));
+
+        // Retentar recursivamente
+        return this.sendToWebhook(parsedEmail, attempt + 1, maxRetries);
+      } else {
+        errorDetails.willRetry = false;
+        errorDetails.reason = attempt >= maxRetries
+          ? 'Máximo de tentativas atingido'
+          : 'Erro não recuperável';
+
+        log('ERROR', 'FALHA DEFINITIVA ao enviar webhook!', errorDetails);
+        return false; // Falha definitiva
+      }
     }
   }
 
