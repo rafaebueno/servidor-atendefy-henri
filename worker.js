@@ -368,6 +368,9 @@ class MailboxManager {
       originalFrom = returnPath.value[0].address;
     }
 
+    // Gera correlation ID único para rastreamento
+    const correlationId = `${this.credentials.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
     const payload = {
       client_id: this.credentials.email,
       from: parsedEmail.from?.value[0]?.address,
@@ -377,7 +380,8 @@ class MailboxManager {
       date: parsedEmail.date,
       original_from: originalFrom,
       text: parsedEmail.text,
-      html: parsedEmail.html
+      html: parsedEmail.html,
+      correlation_id: correlationId  // Para rastrear no n8n
     };
 
     // Validação de payload
@@ -427,7 +431,12 @@ class MailboxManager {
       const response = await axios.post(webhookUrl, payload, {
         timeout: 30000, // 30 segundos
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'X-Correlation-ID': correlationId,  // Header para rastreamento
+          'X-Request-ID': correlationId,
+          'X-Timestamp': new Date().toISOString(),
+          'Cache-Control': 'no-cache, no-store, must-revalidate',  // Evita cache
+          'Pragma': 'no-cache'
         },
         validateStatus: function (status) {
           return status >= 200 && status < 300; // Aceita apenas 2xx como sucesso
@@ -439,11 +448,22 @@ class MailboxManager {
       log('INFO', 'Webhook enviado com sucesso!', {
         ...this.logDetails,
         messageId: parsedEmail.messageId,
+        correlationId: correlationId,  // IMPORTANTE: Para rastrear no n8n
         webhookUrl: webhookUrl,
         statusCode: response.status,
         statusText: response.statusText,
         durationMs: duration,
         responseData: response.data ? JSON.stringify(response.data).substring(0, 200) : null,
+        responseHeaders: {
+          server: response.headers['server'],
+          date: response.headers['date'],
+          contentType: response.headers['content-type'],
+          contentLength: response.headers['content-length'],
+          connection: response.headers['connection'],
+          cacheControl: response.headers['cache-control'],
+          via: response.headers['via'],  // Indica se passou por proxy/cache
+          xCacheStatus: response.headers['x-cache'] || response.headers['x-cache-status']  // Status de cache
+        },
         attempt: attempt,
         retriesUsed: attempt - 1
       });
